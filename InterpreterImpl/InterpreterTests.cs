@@ -51,9 +51,32 @@ namespace InterpreterImpl
             Assert.Equal(7 + 3 * (10 / (12 / (3 + 1) - 1)), Expr("7 + 3 * (10 / (12 / (3 + 1) - 1))"));
         }
 
+        [Fact]
+        public void RPNTest()
+        {
+            Assert.Equal("5 3 + 12 * 3 /", RPN("(5 + 3) * 12 / 3"));
+        }
+
+        [Fact]
+        public void LISPTest()
+        {
+            Assert.Equal("(+ 2 3)", LISP("2 + 3"));
+            Assert.Equal("(+ 2 (* 3 5))", LISP("(2 + 3 * 5)"));
+        }
+
+        private string RPN(string text)
+        {
+            return new Interpreter(new Parser(new Lexer(text))).RPN();
+        }
+
+        private string LISP(string text)
+        {
+            return new Interpreter(new Parser(new Lexer(text))).LISP();
+        }
+
         private int Expr(string text)
         {
-            return new Interpreter(new Lexer(text)).Expr();
+            return new Interpreter(new Parser(new Lexer(text))).Expr();
         }
     }
 
@@ -147,18 +170,18 @@ namespace InterpreterImpl
         }
     }
 
-    internal class Interpreter
+    internal class Parser
     {
         private readonly Lexer lexer;
         private Token currentToken;
 
-        public Interpreter(Lexer lexer)
+        public Parser(Lexer lexer)
         {
             this.lexer = lexer;
             this.currentToken = lexer.GetNextToken();
         }
 
-        internal int Factor()
+        internal AST Factor()
         {
             if (currentToken.Type == Operation.Lparen)
             {
@@ -170,29 +193,29 @@ namespace InterpreterImpl
 
             var result = currentToken.Value;
             Eat(Operation.Integer);
-            return result;
+            return new Num(result);
         }
 
-        internal int Term()
+        internal AST Term()
         {
-            int result = Factor();
+            var result = Factor();
             while (currentToken.Type == Operation.Mul || currentToken.Type == Operation.Div)
             {
                 if (currentToken.Type == Operation.Mul)
                 {
                     Eat(Operation.Mul);
-                    result *= Factor();
+                    result = new BinOp(result, Operation.Mul, Factor());
                 }
                 else if (currentToken.Type == Operation.Div)
                 {
                     Eat(Operation.Div);
-                    result /= Factor();
+                    result = new BinOp(result, Operation.Div, Factor());
                 }
             }
             return result;
         }
 
-        internal int Expr()
+        internal AST Expr()
         {
             var result = Term();
 
@@ -201,12 +224,12 @@ namespace InterpreterImpl
                 if (currentToken.Type == Operation.Plus)
                 {
                     Eat(Operation.Plus);
-                    result += Term();
+                    result = new BinOp(result, Operation.Plus, Term());
                 }
                 else if (currentToken.Type == Operation.Minus)
                 {
                     Eat(Operation.Minus);
-                    result -= Term();
+                    result = new BinOp(result, Operation.Minus, Term());
                 }
                 else
                 {
@@ -227,6 +250,141 @@ namespace InterpreterImpl
             {
                 throw new InvalidOperationException();
             }
+        }
+    }
+
+    internal abstract class AST
+    {
+        internal abstract string RPN();
+        internal abstract string LISP();
+    }
+
+    internal class BinOp : AST
+    {
+        public BinOp(AST left, Operation op, AST right)
+        {
+            this.Left = left;
+            this.Operation = op;
+            this.Right = right;
+        }
+
+        public Operation Operation { get; }
+        internal AST Left { get; }
+        internal AST Right { get; }
+
+        public override string ToString()
+        {
+            return $"{this.Left} {this.Operation} {this.Right}";
+        }
+
+        internal override string RPN()
+        {
+            return $"{this.Left.RPN()} {this.Right.RPN()} {ConvertToString(this.Operation)}";
+        }
+
+        internal override string LISP()
+        {
+            return $"({ConvertToString(this.Operation)} {this.Left.LISP()} {this.Right.LISP()})";
+        }
+
+        string ConvertToString(Operation operation)
+        {
+            switch (operation)
+            {
+                case Operation.Plus: return "+";
+                case Operation.Minus: return "-";
+                case Operation.Div: return "/";
+                case Operation.Mul: return "*";
+                default: throw new InvalidOperationException();
+            }
+        }
+    }
+
+    internal class Num : AST
+    {
+        public int Value { get; }
+
+        public Num(int value)
+        {
+            this.Value = value;
+        }
+
+        public override string ToString()
+        {
+            return $"{this.Value}";
+        }
+
+        internal override string RPN()
+        {
+            return this.ToString();
+        }
+
+        internal override string LISP()
+        {
+            return this.ToString();
+        }
+    }
+
+    internal class NodeVisitor
+    {
+    }
+
+    internal class Interpreter : NodeVisitor
+    {
+        private readonly Parser parser;
+
+        public Interpreter(Parser parser)
+        {
+            this.parser = parser;
+        }
+
+        protected int Visit(AST node)
+        {
+            if (node is Num num)
+            {
+                return VisitNum(num);
+            }
+            if (node is BinOp binOp)
+            {
+                return VisitBinOp(binOp);
+            }
+            throw new NotImplementedException();
+        }
+
+        internal int VisitNum(Num node)
+        {
+            return node.Value;
+        }
+
+        internal int VisitBinOp(BinOp node)
+        {
+            switch (node.Operation)
+            {
+                case Operation.Plus:
+                    return Visit(node.Left) + Visit(node.Right);
+                case Operation.Minus:
+                    return Visit(node.Left) - Visit(node.Right);
+                case Operation.Mul:
+                    return Visit(node.Left) * Visit(node.Right);
+                case Operation.Div:
+                    return Visit(node.Left) / Visit(node.Right);
+                default: throw new NotImplementedException();
+            }
+        }
+
+        internal int Expr()
+        {
+            return Visit(parser.Expr());
+        }
+
+        internal string RPN()
+        {
+            return parser.Expr().RPN();
+        }
+
+        internal string LISP()
+        {
+            return parser.Expr().LISP();
         }
     }
 
