@@ -52,6 +52,15 @@ namespace InterpreterImpl
         }
 
         [Fact]
+        public void UnaryTest()
+        {
+            Assert.Equal(-3, Expr("- 3"));
+            Assert.Equal(3, Expr("+ 3"));
+            Assert.Equal(5 - - - + - 3, Expr("5 - - - + - 3"));
+            Assert.Equal(5 - - - + - (3 + 4) - +2, Expr("5 - - - + - (3 + 4) - +2"));
+        }
+
+        [Fact]
         public void RPNTest()
         {
             Assert.Equal("5 3 + 12 * 3 /", RPN("(5 + 3) * 12 / 3"));
@@ -183,6 +192,18 @@ namespace InterpreterImpl
 
         internal AST Factor()
         {
+            if (currentToken.Type == Operation.Plus)
+            {
+                Eat(Operation.Plus);
+                return new UnaryOp(Operation.Plus, Factor());
+            }
+
+            if (currentToken.Type == Operation.Minus)
+            {
+                Eat(Operation.Minus);
+                return new UnaryOp(Operation.Minus, Factor());
+            }
+
             if (currentToken.Type == Operation.Lparen)
             {
                 Eat(Operation.Lparen);
@@ -300,6 +321,33 @@ namespace InterpreterImpl
         }
     }
 
+    internal class UnaryOp : AST
+    {
+        public UnaryOp(Operation operation, AST expr)
+        {
+            Operation = operation;
+            Expr = expr;
+        }
+
+        public Operation Operation { get; set; }
+        public AST Expr { get; set; }
+
+        public override string ToString()
+        {
+            return $"{this.Operation}{this.Expr}";
+        }
+
+        internal override string LISP()
+        {
+            return this.ToString();
+        }
+
+        internal override string RPN()
+        {
+            return this.ToString();
+        }
+    }
+
     internal class Num : AST
     {
         public int Value { get; }
@@ -348,6 +396,10 @@ namespace InterpreterImpl
             {
                 return VisitBinOp(binOp);
             }
+            if (node is UnaryOp unaryOp)
+            {
+                return VisitUnaryOp(unaryOp);
+            }
             throw new NotImplementedException();
         }
 
@@ -368,6 +420,18 @@ namespace InterpreterImpl
                     return Visit(node.Left) * Visit(node.Right);
                 case Operation.Div:
                     return Visit(node.Left) / Visit(node.Right);
+                default: throw new NotImplementedException();
+            }
+        }
+
+        internal int VisitUnaryOp(UnaryOp node)
+        {
+            switch (node.Operation)
+            {
+                case Operation.Plus:
+                    return +Visit(node.Expr);
+                case Operation.Minus:
+                    return -Visit(node.Expr);
                 default: throw new NotImplementedException();
             }
         }
