@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using Xunit;
 
 namespace InterpreterImpl
@@ -73,6 +75,32 @@ namespace InterpreterImpl
             Assert.Equal("(+ 2 (* 3 5))", LISP("(2 + 3 * 5)"));
         }
 
+        [Fact]
+        public void GlobalScopeTest()
+        {
+            Assert.Equal("[ number : 2, a : 2, b : 25, c : 27, x : 11 ]", GlobalScope(Program));
+        }
+
+        private static string GlobalScope(string text)
+        {
+            Interpreter interpreter = new Interpreter(new Parser(new Lexer(text)));
+            interpreter.Interpret();
+            return interpreter.PrintGlobalScope();
+        }
+
+        private static string Program => ""
+            + "BEGIN\n"
+            + "\n"
+            + "    BEGIN\n"
+            + "        number := 2;\n"
+            + "        a := number;\n"
+            + "        b := 10 * a + 10 * number / 4;\n"
+            + "        c := a - - b\n"
+            + "    END;\n"
+            + "\n"
+            + "    x := 11;\n"
+            + "END.\n";
+
         private string RPN(string text)
         {
             return new Interpreter(new Parser(new Lexer(text))).RPN();
@@ -96,6 +124,12 @@ namespace InterpreterImpl
         private int pos = 0;
         private readonly string text;
 
+        Dictionary<string, Token> Keywords = new Dictionary<string, Token>
+        {
+            { "BEGIN", new Token(Operation.Begin, "BEGIN") },
+            { "END", new Token(Operation.End, "END") },
+        };
+
         public Lexer(string text)
         {
             this.text = text;
@@ -112,6 +146,30 @@ namespace InterpreterImpl
             if (Char.IsDigit(currentChar))
             {
                 return new Token(Operation.Integer, Int());
+            }
+
+            if (Char.IsLetter(currentChar))
+            {
+                return ID();
+            }
+
+            if (currentChar == ':' && this.Peek() == '=')
+            {
+                Advance();
+                Advance();
+                return new Token(Operation.Assign, '=');
+            }
+
+            if (currentChar == '.')
+            {
+                Advance();
+                return new Token(Operation.Dot, '.');
+            }
+
+            if (currentChar == ';')
+            {
+                Advance();
+                return new Token(Operation.Semi, ';');
             }
 
             if (currentChar == '+')
@@ -158,6 +216,28 @@ namespace InterpreterImpl
             throw new InvalidOperationException();
         }
 
+        private Token ID()
+        {
+            string result = string.Empty;
+            while (Char.IsLetter(currentChar))
+            {
+                result += currentChar.ToString();
+                Advance();
+            }
+
+            if (Keywords.ContainsKey(result))
+            {
+                return Keywords[result];
+            }
+            return new Token(Operation.ID, result);
+        }
+
+        private char Peek()
+        {
+            var peek_pos = pos + 1;
+            return (peek_pos > this.text.Length - 1) ? EOF : this.text[peek_pos];
+        }
+
         private int Int()
         {
             string s = string.Empty;
@@ -190,6 +270,76 @@ namespace InterpreterImpl
             this.currentToken = lexer.GetNextToken();
         }
 
+        internal AST Program()
+        {
+            AST node = CompoundStatement();
+            Eat(Operation.Dot);
+            return node;
+        }
+
+        private AST CompoundStatement()
+        {
+            Eat(Operation.Begin);
+            List<AST> nodes = StatementList();
+            Eat(Operation.End);
+            var root = new Compound();
+            foreach (var node in nodes)
+            {
+                root.AddNode(node);
+            }
+            return root;
+        }
+
+        private List<AST> StatementList()
+        {
+            var result = new List<AST> { Statement() };
+            while (currentToken.Type == Operation.Semi)
+            {
+                Eat(Operation.Semi);
+                result.Add(Statement());
+            }
+            if (currentToken.Type == Operation.ID)
+            {
+                throw new InvalidOperationException();
+            }
+            return result;
+        }
+
+        private AST Statement()
+        {
+            if (currentToken.Type == Operation.Begin)
+            {
+                return CompoundStatement();
+            }
+            if (currentToken.Type == Operation.ID)
+            {
+                return AssignmentStatement();
+            }
+            return Empty();
+        }
+
+        private AST AssignmentStatement()
+        {
+            Var left = Variable();
+            var token = currentToken;
+            Eat(Operation.Assign);
+            AST right = Expr();
+
+            return new Assign(left, token, right);
+        }
+
+        private Var Variable()
+        {
+            var node = new Var(currentToken);
+            Eat(Operation.ID);
+            return node;
+        }
+
+        private static NoOp Empty()
+        {
+            return new NoOp();
+        }
+
         internal AST Factor()
         {
             if (currentToken.Type == Operation.Plus)
@@ -212,9 +362,14 @@ namespace InterpreterImpl
                 return res;
             }
 
-            var result = currentToken.Value;
-            Eat(Operation.Integer);
-            return new Num(result);
+            if (currentToken.Type == Operation.Integer)
+            {
+                var result = currentToken.Value;
+                Eat(Operation.Integer);
+                return new Num(result);
+            }
+
+            return Variable();
         }
 
         internal AST Term()
@@ -261,6 +416,18 @@ namespace InterpreterImpl
             return result;
         }
 
+        internal AST Parse()
+        {
+            var node = Program();
+
+            if (currentToken.Type != Operation.EOF)
+            {
+                throw new InvalidOperationException();
+            }
+
+            return node;
+        }
+
         private void Eat(Operation type)
         {
             if (currentToken.Type == type)
@@ -278,6 +445,85 @@ namespace InterpreterImpl
     {
         internal abstract string RPN();
         internal abstract string LISP();
+    }
+
+    internal class Compound : AST
+    {
+        internal List<AST> Children { get; } = new List<AST>();
+
+        internal void AddNode(AST node)
+        {
+            Children.Add(node);
+        }
+
+        internal override string LISP()
+        {
+            throw new NotImplementedException();
+        }
+
+        internal override string RPN()
+        {
+            throw new NotImplementedException();
+        }
+    }
+
+    internal class Assign : AST
+    {
+        internal Var Left { get; }
+        internal Operation Operation { get; }
+        internal AST Right { get; }
+
+        public Assign(Var left, Token op, AST right)
+        {
+            Left = left;
+            Operation = op.Type;
+            Right = right;
+        }
+
+        internal override string LISP()
+        {
+            throw new NotImplementedException();
+        }
+
+        internal override string RPN()
+        {
+            throw new NotImplementedException();
+        }
+    }
+
+    internal class Var : AST
+    {
+        public Var(Token token)
+        {
+            Token = token;
+            Value = token.Value;
+        }
+
+        public Token Token { get; }
+        public dynamic Value { get; }
+
+        internal override string LISP()
+        {
+            throw new NotImplementedException();
+        }
+
+        internal override string RPN()
+        {
+            throw new NotImplementedException();
+        }
+    }
+
+    internal class NoOp : AST
+    {
+        internal override string LISP()
+        {
+            return string.Empty;
+        }
+
+        internal override string RPN()
+        {
+            return string.Empty;
+        }
     }
 
     internal class BinOp : AST
@@ -379,6 +625,8 @@ namespace InterpreterImpl
 
     internal class Interpreter : NodeVisitor
     {
+        Dictionary<string, dynamic> GlobalScope = new Dictionary<string, dynamic>();
+
         private readonly Parser parser;
 
         public Interpreter(Parser parser)
@@ -388,6 +636,22 @@ namespace InterpreterImpl
 
         protected int Visit(AST node)
         {
+            if (node is Compound compound)
+            {
+                return VisitCompound(compound);
+            }
+            if (node is Assign assign)
+            {
+                return VisitAssign(assign);
+            }
+            if (node is NoOp noOp)
+            {
+                return VisitNoOp(noOp);
+            }
+            if (node is Var var)
+            {
+                return VisitVar(var);
+            }
             if (node is Num num)
             {
                 return VisitNum(num);
@@ -401,6 +665,35 @@ namespace InterpreterImpl
                 return VisitUnaryOp(unaryOp);
             }
             throw new NotImplementedException();
+        }
+
+        private dynamic VisitVar(Var var)
+        {
+            if (GlobalScope.ContainsKey(var.Value))
+            {
+                return GlobalScope[var.Value];
+            }
+            throw new InvalidOperationException();
+        }
+
+        private int VisitNoOp(NoOp noOp)
+        {
+            return 0;
+        }
+
+        private int VisitAssign(Assign assign)
+        {
+            GlobalScope[assign.Left.Value] = Visit(assign.Right);
+            return 0;
+        }
+
+        private int VisitCompound(Compound compound)
+        {
+            foreach (var item in compound.Children)
+            {
+                Visit(item);
+            }
+            return 0;
         }
 
         internal int VisitNum(Num node)
@@ -436,6 +729,12 @@ namespace InterpreterImpl
             }
         }
 
+        internal int Interpret()
+        {
+            var tree = parser.Parse();
+            return Visit(tree);
+        }
+
         internal int Expr()
         {
             return Visit(parser.Expr());
@@ -450,12 +749,23 @@ namespace InterpreterImpl
         {
             return parser.Expr().LISP();
         }
+
+        internal string PrintGlobalScope()
+        {
+            return $"[ {string.Join(", ", GlobalScope.Select(item => $"{item.Key} : {item.Value}"))} ]";
+        }
     }
 
     internal enum Operation
     {
         None,
         EOF,
+        Begin,
+        End,
+        Dot,
+        ID,
+        Assign,
+        Semi,
         Integer,
         Plus,
         Minus,
@@ -465,12 +775,12 @@ namespace InterpreterImpl
         Rparen
     }
 
-    internal class Token
+    internal struct Token
     {
         internal Operation Type { get; }
-        internal int Value { get; }
+        internal dynamic Value { get; }
 
-        public Token(Operation type, int value)
+        public Token(Operation type, dynamic value)
         {
             Type = type;
             Value = value;
