@@ -63,19 +63,6 @@ namespace InterpreterImpl
         }
 
         [Fact]
-        public void RPNTest()
-        {
-            Assert.Equal("5 3 + 12 * 3 /", RPN("(5 + 3) * 12 / 3"));
-        }
-
-        [Fact]
-        public void LISPTest()
-        {
-            Assert.Equal("(+ 2 3)", LISP("2 + 3"));
-            Assert.Equal("(+ 2 (* 3 5))", LISP("(2 + 3 * 5)"));
-        }
-
-        [Fact]
         public void GlobalScopeTest()
         {
             Assert.Equal("[ number : 2, a : 2, b : 25, c : 27, x : 11 ]", GlobalScope(Program));
@@ -100,16 +87,6 @@ namespace InterpreterImpl
             + "\n"
             + "    x := 11;\n"
             + "END.\n";
-
-        private string RPN(string text)
-        {
-            return new Interpreter(new Parser(new Lexer(text))).RPN();
-        }
-
-        private string LISP(string text)
-        {
-            return new Interpreter(new Parser(new Lexer(text))).LISP();
-        }
 
         private int Expr(string text)
         {
@@ -443,8 +420,6 @@ namespace InterpreterImpl
 
     internal abstract class AST
     {
-        internal abstract string RPN();
-        internal abstract string LISP();
     }
 
     internal class Compound : AST
@@ -454,16 +429,6 @@ namespace InterpreterImpl
         internal void AddNode(AST node)
         {
             Children.Add(node);
-        }
-
-        internal override string LISP()
-        {
-            throw new NotImplementedException();
-        }
-
-        internal override string RPN()
-        {
-            throw new NotImplementedException();
         }
     }
 
@@ -479,16 +444,6 @@ namespace InterpreterImpl
             Operation = op.Type;
             Right = right;
         }
-
-        internal override string LISP()
-        {
-            throw new NotImplementedException();
-        }
-
-        internal override string RPN()
-        {
-            throw new NotImplementedException();
-        }
     }
 
     internal class Var : AST
@@ -501,29 +456,10 @@ namespace InterpreterImpl
 
         public Token Token { get; }
         public dynamic Value { get; }
-
-        internal override string LISP()
-        {
-            throw new NotImplementedException();
-        }
-
-        internal override string RPN()
-        {
-            throw new NotImplementedException();
-        }
     }
 
     internal class NoOp : AST
     {
-        internal override string LISP()
-        {
-            return string.Empty;
-        }
-
-        internal override string RPN()
-        {
-            return string.Empty;
-        }
     }
 
     internal class BinOp : AST
@@ -543,28 +479,6 @@ namespace InterpreterImpl
         {
             return $"{this.Left} {this.Operation} {this.Right}";
         }
-
-        internal override string RPN()
-        {
-            return $"{this.Left.RPN()} {this.Right.RPN()} {ConvertToString(this.Operation)}";
-        }
-
-        internal override string LISP()
-        {
-            return $"({ConvertToString(this.Operation)} {this.Left.LISP()} {this.Right.LISP()})";
-        }
-
-        string ConvertToString(Operation operation)
-        {
-            switch (operation)
-            {
-                case Operation.Plus: return "+";
-                case Operation.Minus: return "-";
-                case Operation.Div: return "/";
-                case Operation.Mul: return "*";
-                default: throw new InvalidOperationException();
-            }
-        }
     }
 
     internal class UnaryOp : AST
@@ -582,16 +496,6 @@ namespace InterpreterImpl
         {
             return $"{this.Operation}{this.Expr}";
         }
-
-        internal override string LISP()
-        {
-            return this.ToString();
-        }
-
-        internal override string RPN()
-        {
-            return this.ToString();
-        }
     }
 
     internal class Num : AST
@@ -606,16 +510,6 @@ namespace InterpreterImpl
         public override string ToString()
         {
             return $"{this.Value}";
-        }
-
-        internal override string RPN()
-        {
-            return this.ToString();
-        }
-
-        internal override string LISP()
-        {
-            return this.ToString();
         }
     }
 
@@ -738,16 +632,6 @@ namespace InterpreterImpl
         internal int Expr()
         {
             return Visit(parser.Expr());
-        }
-
-        internal string RPN()
-        {
-            return parser.Expr().RPN();
-        }
-
-        internal string LISP()
-        {
-            return parser.Expr().LISP();
         }
 
         internal string PrintGlobalScope()
