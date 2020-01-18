@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.Serialization;
 using Xunit;
 
 namespace InterpreterImpl
@@ -28,7 +29,7 @@ namespace InterpreterImpl
         {
             Assert.Equal(1, Expr("0+2-1"));
             Assert.Equal(11, Expr("20 - 10 + 1"));
-            Assert.Equal(0 + 1 * 2 - 3 / 1 + 4, Expr("0 + 1 * 2 - 3 / 1 + 4"));
+            Assert.Equal(0 + 1 * 2 - 3 / 1 + 4, Expr("0 + 1 * 2 - 3 DIV 1 + 4"));
         }
 
         [Fact]
@@ -40,11 +41,19 @@ namespace InterpreterImpl
         }
 
         [Fact]
-        public void DivTest()
+        public void IntDivTest()
         {
-            Assert.Equal(0, Expr("0/1"));
-            Assert.Equal(2, Expr("2 / 1"));
-            Assert.Equal(3, Expr("12 / 2 / 2"));
+            Assert.Equal(0, Expr("0DIV1"));
+            Assert.Equal(2, Expr("2 DIV 1"));
+            Assert.Equal(1, Expr("12 DIV 2 DIV 5"));
+        }
+
+        [Fact]
+        public void FloatDivTest()
+        {
+            Assert.Equal(0f, Expr("0.0/1.0"));
+            Assert.Equal(2f / 1f, Expr("2 / 1"));
+            Assert.Equal(12f / 2f / 5f, Expr("12 / 2 / 5"), 5);
         }
 
         [Fact]
@@ -65,7 +74,7 @@ namespace InterpreterImpl
         [Fact]
         public void GlobalScopeTest()
         {
-            Assert.Equal("[ number : 2, a : 2, b : 25, c : 27, x : 11 ]", GlobalScope(Program));
+            Assert.Equal($"[ number : 2, a : 2, b : 25, c : 27, x : 11, y : {20f / 7f + 3.14f} ]", GlobalScope(Program));
         }
 
         private static string GlobalScope(string text)
@@ -76,19 +85,31 @@ namespace InterpreterImpl
         }
 
         private static string Program => ""
-            + "BEGIN\n"
+            + "PROGRAM Part10;\n"
+            + "VAR\n"
+            + "    number     : INTEGER;\n"
+            + "    a, b, c, x : INTEGER;\n"
+            + "    y          : REAL;\n"
             + "\n"
+            + "BEGIN {Part10}\n"
             + "    BEGIN\n"
             + "        number := 2;\n"
             + "        a := number;\n"
-            + "        b := 10 * a + 10 * number / 4;\n"
+            + "        b := 10 * a + 10 * number DIV 4;\n"
             + "        c := a - - b\n"
             + "    END;\n"
             + "\n"
             + "    x := 11;\n"
-            + "END.\n";
+            + "    y := 20 / 7 + 3.14;\n"
+            + "    { writeln('a = ', a); }\n"
+            + "    { writeln('b = ', b); }\n"
+            + "    { writeln('c = ', c); }\n"
+            + "    { writeln('number = ', number); }\n"
+            + "    { writeln('x = ', x); }\n"
+            + "    { writeln('y = ', y); }\n"
+            + "END.  {Part10}\n";
 
-        private int Expr(string text)
+        private dynamic Expr(string text)
         {
             return new Interpreter(new Parser(new Lexer(text))).Expr();
         }
@@ -103,6 +124,11 @@ namespace InterpreterImpl
 
         Dictionary<string, Token> Keywords = new Dictionary<string, Token>
         {
+            { "PROGRAM", new Token(Operation.Program, "PROGRAM") },
+            { "VAR", new Token(Operation.Var, "VAR") },
+            { "INTEGER", new Token(Operation.Integer, "INTEGER") },
+            { "REAL", new Token(Operation.Real, "REAL") },
+            { "DIV", new Token(Operation.IntegerDiv, "INTEGER_DIV") },
             { "BEGIN", new Token(Operation.Begin, "BEGIN") },
             { "END", new Token(Operation.End, "END") },
         };
@@ -115,88 +141,84 @@ namespace InterpreterImpl
 
         internal Token GetNextToken()
         {
-            while (Char.IsWhiteSpace(currentChar))
+            while (this.currentChar != EOF)
             {
-                Advance();
+                if (Char.IsWhiteSpace(currentChar))
+                {
+                    while (Char.IsWhiteSpace(currentChar))
+                        Advance();
+                    continue;
+                }
+
+                if (currentChar == '{')
+                {
+                    while (currentChar != '}')
+                        Advance();
+                    Advance();
+                    continue;
+                }
+
+                if (Char.IsDigit(currentChar))
+                {
+                    return Number();
+                }
+
+                if (Char.IsLetter(currentChar))
+                {
+                    return ID();
+                }
+
+                if (currentChar == ':' && this.Peek() == '=')
+                {
+                    Advance();
+                    Advance();
+                    return new Token(Operation.Assign, '=');
+                }
+
+                switch (this.currentChar)
+                {
+                    case '.':
+                        Advance();
+                        return new Token(Operation.Dot, '.');
+                    case ';':
+                        Advance();
+                        return new Token(Operation.Semi, ';');
+                    case ':':
+                        Advance();
+                        return new Token(Operation.Colon, ':');
+                    case ',':
+                        Advance();
+                        return new Token(Operation.Comma, ',');
+                    case '+':
+                        Advance();
+                        return new Token(Operation.Plus, '+');
+                    case '-':
+                        Advance();
+                        return new Token(Operation.Minus, '-');
+                    case '*':
+                        Advance();
+                        return new Token(Operation.Mul, '*');
+                    case '/':
+                        Advance();
+                        return new Token(Operation.FloatDiv, '/');
+                    case '(':
+                        Advance();
+                        return new Token(Operation.Lparen, '(');
+                    case ')':
+                        Advance();
+                        return new Token(Operation.Rparen, ')');
+                    default:
+                        throw new InvalidOperationException("Error parsing input");
+                }
             }
 
-            if (Char.IsDigit(currentChar))
-            {
-                return new Token(Operation.Integer, Int());
-            }
-
-            if (Char.IsLetter(currentChar))
-            {
-                return ID();
-            }
-
-            if (currentChar == ':' && this.Peek() == '=')
-            {
-                Advance();
-                Advance();
-                return new Token(Operation.Assign, '=');
-            }
-
-            if (currentChar == '.')
-            {
-                Advance();
-                return new Token(Operation.Dot, '.');
-            }
-
-            if (currentChar == ';')
-            {
-                Advance();
-                return new Token(Operation.Semi, ';');
-            }
-
-            if (currentChar == '+')
-            {
-                Advance();
-                return new Token(Operation.Plus, '+');
-            }
-
-            if (currentChar == '-')
-            {
-                Advance();
-                return new Token(Operation.Minus, '-');
-            }
-
-            if (currentChar == '*')
-            {
-                Advance();
-                return new Token(Operation.Mul, '*');
-            }
-
-            if (currentChar == '/')
-            {
-                Advance();
-                return new Token(Operation.Div, '/');
-            }
-
-            if (currentChar == '(')
-            {
-                Advance();
-                return new Token(Operation.Lparen, '(');
-            }
-
-            if (currentChar == ')')
-            {
-                Advance();
-                return new Token(Operation.Rparen, ')');
-            }
-
-            if (currentChar == EOF)
-            {
-                return new Token(Operation.EOF, EOF);
-            }
-
-            throw new InvalidOperationException();
+            return new Token(Operation.EOF, EOF);
         }
 
         private Token ID()
         {
             string result = string.Empty;
-            while (Char.IsLetter(currentChar))
+            while (Char.IsLetterOrDigit(currentChar))
             {
                 result += currentChar.ToString();
                 Advance();
@@ -215,7 +237,7 @@ namespace InterpreterImpl
             return (peek_pos > this.text.Length - 1) ? EOF : this.text[peek_pos];
         }
 
-        private int Int()
+        private Token Number()
         {
             string s = string.Empty;
             while (Char.IsDigit(currentChar))
@@ -223,7 +245,19 @@ namespace InterpreterImpl
                 s += currentChar.ToString();
                 Advance();
             }
-            return int.Parse(s);
+            if (currentChar == '.')
+            {
+                s += currentChar.ToString();
+                Advance();
+                while (Char.IsDigit(currentChar))
+                {
+                    s += currentChar.ToString();
+                    Advance();
+                }
+                return new Token(Operation.RealConst, float.Parse(s));
+            }
+
+            return new Token(Operation.IntegerConst, int.Parse(s));
         }
 
         private void Advance()
@@ -247,14 +281,60 @@ namespace InterpreterImpl
             this.currentToken = lexer.GetNextToken();
         }
 
-        internal AST Program()
+        internal Program Program()
         {
-            AST node = CompoundStatement();
+            Eat(Operation.Program);
+            var variable = Variable();
+            Eat(Operation.Semi);
+            Block block = Block();
             Eat(Operation.Dot);
-            return node;
+            return new Program(variable.Value, block);
         }
 
-        private AST CompoundStatement()
+        private Block Block()
+        {
+            return new Block(Declarations(), CompoundStatement());
+        }
+
+        private VarDecl[] Declarations()
+        {
+            var result = new List<VarDecl>();
+            if (currentToken.Type == Operation.Var)
+            {
+                Eat(Operation.Var);
+                while (currentToken.Type == Operation.ID)
+                {
+                    result.AddRange(VariableDeclaration());
+                    Eat(Operation.Semi);
+                }
+            }
+
+            return result.ToArray();
+        }
+
+        private IEnumerable<VarDecl> VariableDeclaration()
+        {
+            var varNodes = new List<Var>();
+            varNodes.Add(new Var(currentToken));
+            Eat(Operation.ID);
+            while (currentToken.Type == Operation.Comma)
+            {
+                Eat(Operation.Comma);
+                varNodes.Add(new Var(currentToken));
+                Eat(Operation.ID);
+            }
+
+            Eat(Operation.Colon);
+
+            var type = Type();
+
+            foreach (var item in varNodes)
+            {
+                yield return new VarDecl(item, type);
+            }
+        }
+
+        private Compound CompoundStatement()
         {
             Eat(Operation.Begin);
             List<AST> nodes = StatementList();
@@ -277,7 +357,7 @@ namespace InterpreterImpl
             }
             if (currentToken.Type == Operation.ID)
             {
-                throw new InvalidOperationException();
+                throw new UnexpectedTokenTypeException(Operation.ID, currentToken.Type);
             }
             return result;
         }
@@ -295,7 +375,7 @@ namespace InterpreterImpl
             return Empty();
         }
 
-        private AST AssignmentStatement()
+        private Assign AssignmentStatement()
         {
             Var left = Variable();
             var token = currentToken;
@@ -309,6 +389,20 @@ namespace InterpreterImpl
         {
             var node = new Var(currentToken);
             Eat(Operation.ID);
+            return node;
+        }
+
+        private Type Type()
+        {
+            var node = new Type(currentToken);
+            if (currentToken.Type == Operation.Integer)
+            {
+                Eat(Operation.Integer);
+            }
+            else
+            {
+                Eat(Operation.Real);
+            }
             return node;
         }
 
@@ -339,10 +433,17 @@ namespace InterpreterImpl
                 return res;
             }
 
-            if (currentToken.Type == Operation.Integer)
+            if (currentToken.Type == Operation.IntegerConst)
             {
                 var result = currentToken.Value;
-                Eat(Operation.Integer);
+                Eat(Operation.IntegerConst);
+                return new Num(result);
+            }
+
+            if (currentToken.Type == Operation.RealConst)
+            {
+                var result = currentToken.Value;
+                Eat(Operation.RealConst);
                 return new Num(result);
             }
 
@@ -352,17 +453,22 @@ namespace InterpreterImpl
         internal AST Term()
         {
             var result = Factor();
-            while (currentToken.Type == Operation.Mul || currentToken.Type == Operation.Div)
+            while (currentToken.Type == Operation.Mul || currentToken.Type == Operation.FloatDiv || currentToken.Type == Operation.IntegerDiv)
             {
                 if (currentToken.Type == Operation.Mul)
                 {
                     Eat(Operation.Mul);
                     result = new BinOp(result, Operation.Mul, Factor());
                 }
-                else if (currentToken.Type == Operation.Div)
+                else if (currentToken.Type == Operation.FloatDiv)
                 {
-                    Eat(Operation.Div);
-                    result = new BinOp(result, Operation.Div, Factor());
+                    Eat(Operation.FloatDiv);
+                    result = new BinOp(result, Operation.FloatDiv, Factor());
+                }
+                else if (currentToken.Type == Operation.IntegerDiv)
+                {
+                    Eat(Operation.IntegerDiv);
+                    result = new BinOp(result, Operation.IntegerDiv, Factor());
                 }
             }
             return result;
@@ -399,7 +505,7 @@ namespace InterpreterImpl
 
             if (currentToken.Type != Operation.EOF)
             {
-                throw new InvalidOperationException();
+                throw new UnexpectedTokenTypeException(Operation.EOF, currentToken.Type);
             }
 
             return node;
@@ -413,13 +519,85 @@ namespace InterpreterImpl
             }
             else
             {
-                throw new InvalidOperationException();
+                throw new UnexpectedTokenTypeException(type, currentToken.Type);
+            }
+        }
+
+        [Serializable]
+        private class UnexpectedTokenTypeException : Exception
+        {
+            public UnexpectedTokenTypeException()
+            {
+            }
+
+            public UnexpectedTokenTypeException(Operation expected, Operation actual) : this($"Expected: {expected}, Actual: {actual}")
+            {
+            }
+
+            public UnexpectedTokenTypeException(string message) : base(message)
+            {
+            }
+
+            public UnexpectedTokenTypeException(string message, Exception innerException) : base(message, innerException)
+            {
+            }
+
+            protected UnexpectedTokenTypeException(SerializationInfo info, StreamingContext context) : base(info, context)
+            {
             }
         }
     }
 
     internal abstract class AST
     {
+    }
+
+    internal class Program : AST
+    {
+        public Program(string name, Block block)
+        {
+            Name = name;
+            Block = block;
+        }
+
+        public string Name { get; }
+        public Block Block { get; }
+    }
+
+    internal class Block : AST
+    {
+        public Block(VarDecl[] declarations, Compound compoundStatement)
+        {
+            Declarations = declarations;
+            CompoundStatement = compoundStatement;
+        }
+
+        public VarDecl[] Declarations { get; }
+        public Compound CompoundStatement { get; }
+    }
+
+    internal class VarDecl : AST
+    {
+        public VarDecl(Var name, Type type)
+        {
+            VarNode = name;
+            TypeNode = type;
+        }
+
+        public Var VarNode { get; }
+        public Type TypeNode { get; }
+    }
+
+    internal class Type : AST
+    {
+        public Type(Token token)
+        {
+            Token = token;
+            Value = token.Value;
+        }
+
+        public Token Token { get; }
+        public dynamic Value { get; }
     }
 
     internal class Compound : AST
@@ -500,9 +678,9 @@ namespace InterpreterImpl
 
     internal class Num : AST
     {
-        public int Value { get; }
+        public dynamic Value { get; }
 
-        public Num(int value)
+        public Num(dynamic value)
         {
             this.Value = value;
         }
@@ -528,37 +706,41 @@ namespace InterpreterImpl
             this.parser = parser;
         }
 
-        protected int Visit(AST node)
+        protected dynamic Visit(AST node)
         {
-            if (node is Compound compound)
+            return node switch
             {
-                return VisitCompound(compound);
-            }
-            if (node is Assign assign)
+                Program program => VisitProgram(program),
+                Block block => VisitBlock(block),
+                VarDecl decl => VisitDecl(decl),
+                Compound compound => VisitCompound(compound),
+                Assign assign => VisitAssign(assign),
+                NoOp noOp => VisitNoOp(noOp),
+                Var var => VisitVar(var),
+                Num num => VisitNum(num),
+                BinOp binOp => VisitBinOp(binOp),
+                UnaryOp unaryOp => VisitUnaryOp(unaryOp),
+                _ => throw new NotImplementedException()
+            };
+        }
+
+        private dynamic VisitDecl(VarDecl decl)
+        {
+            return 0;
+        }
+
+        private dynamic VisitBlock(Block block)
+        {
+            foreach (var item in block.Declarations)
             {
-                return VisitAssign(assign);
+                Visit(item);
             }
-            if (node is NoOp noOp)
-            {
-                return VisitNoOp(noOp);
-            }
-            if (node is Var var)
-            {
-                return VisitVar(var);
-            }
-            if (node is Num num)
-            {
-                return VisitNum(num);
-            }
-            if (node is BinOp binOp)
-            {
-                return VisitBinOp(binOp);
-            }
-            if (node is UnaryOp unaryOp)
-            {
-                return VisitUnaryOp(unaryOp);
-            }
-            throw new NotImplementedException();
+            return Visit(block.CompoundStatement);
+        }
+
+        private dynamic VisitProgram(Program program)
+        {
+            return Visit(program.Block);
         }
 
         private dynamic VisitVar(Var var)
@@ -590,12 +772,12 @@ namespace InterpreterImpl
             return 0;
         }
 
-        internal int VisitNum(Num node)
+        internal dynamic VisitNum(Num node)
         {
             return node.Value;
         }
 
-        internal int VisitBinOp(BinOp node)
+        internal dynamic VisitBinOp(BinOp node)
         {
             switch (node.Operation)
             {
@@ -605,13 +787,15 @@ namespace InterpreterImpl
                     return Visit(node.Left) - Visit(node.Right);
                 case Operation.Mul:
                     return Visit(node.Left) * Visit(node.Right);
-                case Operation.Div:
+                case Operation.IntegerDiv:
                     return Visit(node.Left) / Visit(node.Right);
+                case Operation.FloatDiv:
+                    return Convert.ToSingle(Visit(node.Left)) / Convert.ToSingle(Visit(node.Right));
                 default: throw new NotImplementedException();
             }
         }
 
-        internal int VisitUnaryOp(UnaryOp node)
+        internal dynamic VisitUnaryOp(UnaryOp node)
         {
             switch (node.Operation)
             {
@@ -623,13 +807,13 @@ namespace InterpreterImpl
             }
         }
 
-        internal int Interpret()
+        internal dynamic Interpret()
         {
             var tree = parser.Parse();
             return Visit(tree);
         }
 
-        internal int Expr()
+        internal dynamic Expr()
         {
             return Visit(parser.Expr());
         }
@@ -643,20 +827,28 @@ namespace InterpreterImpl
     internal enum Operation
     {
         None,
-        EOF,
+        Program,
+        Var,
+        ID,
+        Integer,
+        Real,
         Begin,
         End,
         Dot,
-        ID,
         Assign,
+        IntegerConst,
+        RealConst,
         Semi,
-        Integer,
+        Colon,
+        Comma,
         Plus,
         Minus,
         Mul,
-        Div,
+        IntegerDiv,
+        FloatDiv,
         Lparen,
-        Rparen
+        Rparen,
+        EOF,
     }
 
     internal struct Token
