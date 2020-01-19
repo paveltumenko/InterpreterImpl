@@ -77,6 +77,32 @@ namespace InterpreterImpl
             Assert.Equal($"[ number : 2, a : 2, b : 25, c : 27, x : 11, y : {20f / 7f + 3.14f} ]", GlobalScope(Program));
         }
 
+        [Fact]
+        public void SymbolTableTest()
+        {
+            var stb = new SymbolTableBuilder();
+            var tree = new Parser(new Lexer(Program)).Parse();
+            stb.Visit(tree);
+        }
+
+        [Fact]
+        public void NameError()
+        {
+            var nameError = ""
+                + "PROGRAM NameError1;\n"
+                + "VAR\n"
+                + "   a : INTEGER;\n"
+                + "\n"
+                + "BEGIN\n"
+                + "   a := 2 + b;\n"
+                + "END.\n";
+            var stb = new SymbolTableBuilder();
+            var tree = new Parser(new Lexer(nameError)).Parse();
+            var ex = Assert.Throws<SymbolTableBuilder.UndeclaredVariableException>(() => stb.Visit(tree));
+
+            Assert.Equal(ex.Message, "b");
+        }
+
         private static string GlobalScope(string text)
         {
             Interpreter interpreter = new Interpreter(new Parser(new Lexer(text)));
@@ -821,6 +847,192 @@ namespace InterpreterImpl
         internal string PrintGlobalScope()
         {
             return $"[ {string.Join(", ", GlobalScope.Select(item => $"{item.Key} : {item.Value}"))} ]";
+        }
+    }
+
+    internal class SymbolTableBuilder : NodeVisitor
+    {
+        private readonly SymbolTable symbolTable;
+
+        public SymbolTableBuilder()
+        {
+            symbolTable = new SymbolTable();
+        }
+
+        public void Visit(AST item)
+        {
+            switch (item)
+            {
+                case BinOp binOp:
+                    Visit(binOp);
+                    return;
+                case UnaryOp unaryOp:
+                    Visit(unaryOp.Expr);
+                    return;
+                case Num num:
+                    Visit(num);
+                    return;
+                case NoOp noOp:
+                    Visit(noOp);
+                    return;
+                case Assign assign:
+                    Visit(assign);
+                    return;
+                case Program assign:
+                    Visit(assign);
+                    return;
+                case Block assign:
+                    Visit(assign);
+                    return;
+                case Compound assign:
+                    Visit(assign);
+                    return;
+                case VarDecl assign:
+                    Visit(assign);
+                    return;
+                case Var assign:
+                    Visit(assign);
+                    return;
+                case Type assign:
+                    Visit(assign);
+                    return;
+            }
+        }
+
+        public void Visit(Program program)
+        {
+            Visit(program.Block);
+        }
+
+        private void Visit(Block block)
+        {
+            foreach (var item in block.Declarations)
+            {
+                Visit(item);
+            }
+            Visit(block.CompoundStatement);
+        }
+
+        private void Visit(Compound compoundStatement)
+        {
+            foreach (var item in compoundStatement.Children)
+            {
+                Visit(item);
+            }
+        }
+
+        void Visit(Num num)
+        {
+        }
+
+        void Visit(NoOp noOp)
+        {
+        }
+
+        void Visit(Assign assign)
+        {
+            dynamic varName = assign.Left.Value;
+            if (this.symbolTable.Lookup(varName) == null)
+                throw new UndeclaredVariableException(varName);
+
+            Visit(assign.Right);
+        }
+
+        private void Visit(BinOp binOp)
+        {
+            Visit(binOp.Left);
+            Visit(binOp.Right);
+        }
+
+        private void Visit(VarDecl item)
+        {
+            var type = this.symbolTable.Lookup(item.TypeNode.Value);
+            symbolTable.Define(new VarSymbol(item.VarNode.Value, type));
+        }
+
+        private void Visit(Var varNode)
+        {
+            if (symbolTable.Lookup(varNode.Value) == null)
+                throw new UndeclaredVariableException(varNode.Value);
+        }
+
+        private void Visit(Type typeNode)
+        {
+        }
+
+        [Serializable]
+        internal class UndeclaredVariableException : Exception
+        {
+            public UndeclaredVariableException()
+            {
+            }
+
+            public UndeclaredVariableException(string message) : base(message)
+            {
+            }
+
+            public UndeclaredVariableException(string message, Exception innerException) : base(message, innerException)
+            {
+            }
+
+            protected UndeclaredVariableException(SerializationInfo info, StreamingContext context) : base(info, context)
+            {
+            }
+        }
+    }
+
+    internal class SymbolTable
+    {
+        private readonly Dictionary<string, Symbol> symbols;
+
+        public SymbolTable()
+        {
+            this.symbols = new Dictionary<string, Symbol>();
+            Define(new BuiltinTypeSymbol("INTEGER"));
+            Define(new BuiltinTypeSymbol("REAL"));
+        }
+
+        public void Define(Symbol symbol)
+        {
+            System.Console.WriteLine($"Define {symbol}");
+            symbols[symbol.Name] = symbol;
+        }
+
+        public Symbol Lookup(string name)
+        {
+            System.Console.WriteLine($"Lookup {name}");
+            return symbols.GetValueOrDefault(name);
+        }
+    }
+
+    internal class VarSymbol : Symbol
+    {
+        public VarSymbol(string name, BuiltinTypeSymbol type = null) : base(name, type)
+        {
+        }
+    }
+
+    internal class BuiltinTypeSymbol : Symbol
+    {
+        public BuiltinTypeSymbol(string name) : base(name)
+        {
+        }
+    }
+
+    internal class Symbol
+    {
+        public Symbol(string name, Symbol type = null)
+        {
+            Name = name;
+            Type = type;
+        }
+
+        public string Name { get; }
+        public Symbol Type { get; }
+
+        public override string ToString()
+        {
+            return $"<{Name}:{Type}>";
         }
     }
 
